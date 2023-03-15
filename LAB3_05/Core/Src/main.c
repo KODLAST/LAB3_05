@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#define IC_BUFFER_SIZE 20
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,7 +46,14 @@ DMA_HandleTypeDef hdma_tim2_ch1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+uint32_t InputCaptureBuffer[IC_BUFFER_SIZE];
+float averageRisingedgePeriod;
+float averagePeriod;
+float MotorReadRPM;
+uint32_t MotorSetRPM;
+uint8_t MotorControlEnable;
+uint32_t duty=0;
+uint32_t MotorSetDuty=50;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,7 +64,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-
+float IC_Calc_Period();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -98,7 +105,11 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+HAL_TIM_Base_Start(&htim2);
+HAL_TIM_IC_Start_DMA(&htim2,TIM_CHANNEL_1, InputCaptureBuffer, IC_BUFFER_SIZE);
 
+HAL_TIM_Base_Start(&htim1);
+HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -108,6 +119,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  static uint32_t timestamp = 0;
+	  if (HAL_GetTick() >= timestamp){
+		  timestamp = HAL_GetTick()+500;
+		  averageRisingedgePeriod = IC_Calc_Period();
+		  MotorReadRPM = (60/averageRisingedgePeriod*12*64);
+		  duty = MotorSetDuty*10;
+		  __HAL_TIM_SET_COMPARE(&htim1,TIM_CHANNEL_1,duty);
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -181,7 +200,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 83;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 1000;
+  htim1.Init.Period = 999;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -374,7 +393,21 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+float IC_Calc_Period(){
+	uint32_t currentDMApointer = IC_BUFFER_SIZE - __HAL_DMA_GET_COUNTER((htim2.hdma[1]));
+	uint32_t lastValidDMAPointer = (currentDMApointer-1 + IC_BUFFER_SIZE) % IC_BUFFER_SIZE;
+	uint32_t i = (lastValidDMAPointer + IC_BUFFER_SIZE -4 )% IC_BUFFER_SIZE;
 
+	int32_t sumdiff=0;
+	while(i != lastValidDMAPointer){
+		uint32_t firstCapture = InputCaptureBuffer[i];
+		uint32_t NextCapture = InputCaptureBuffer[(i+1)%IC_BUFFER_SIZE];
+		sumdiff += NextCapture - firstCapture;
+		i = (i+1)% IC_BUFFER_SIZE;
+
+	}
+	return sumdiff/5.0;;
+}
 /* USER CODE END 4 */
 
 /**
